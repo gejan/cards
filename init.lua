@@ -7,15 +7,13 @@ local STACK_FORM = "size[2,6]"..
     "button_exit[0,0;2,1;draw_turned;draw turned]"..
     "button_exit[0,1;2,1;shuffle;shuffle]"..
     "button_exit[0,2;2,1;flip;flip]"..
-    "button_exit[0,3;2,1;collect;collect]"..
-    "button_exit[0,4;2,1;remove;delete stack]"..
-    "button_exit[0,5;2,1;quit;quit]"
+    "button_exit[0,3;2,1;remove;delete stack]"..
+    "button_exit[0,4;2,1;quit;quit]"
 local CARD_FORM = "size[3,5]"..
     "button_exit[0,0;3,1;flip;flip]"..
     "button_exit[0,1;3,1;shuffle;shuffle]"..
-    "button_exit[0,2;3,1;collect;collect]"..
-    "button_exit[0,3;3,1;delete;not show again]"..
-    "button_exit[0,4;3,1;quit;quit]"
+    "button_exit[0,2;3,1;delete;not show again]"..
+    "button_exit[0,3;3,1;quit;quit]"
 local box_form = "size[10,4]"
 local MAX_WEAR = 65535
 local WEAR_MULTIPLIER = 128
@@ -52,46 +50,39 @@ minetest.register_node("cards:turned_card", {
 local num_decks = 0
 
 local function register_deck(deckname, data)
-  local name = "cards:stack_"..deckname
+  local name = "cards:deck_"..deckname
+  local cardname = data.cardname
+  local stackname = "cards:stack_"..cardname
   local size = data.number_of_suits * data.number_of_values
   box_form = box_form..
       "item_image_button["..num_decks..",2;1,1;"..name..";"..name.."#"..size..";]"..
       "label["..num_decks..",1;"..deckname.."]"..
       "label["..num_decks..",3;"..size.."]"
   num_decks = num_decks + 1
-  minetest.register_node(name, {
+  minetest.register_craftitem(name, {
     description = "set of playing cards ("..deckname..")",
-    inventory_image = data.back_texture,
-    wield_image = data.back_texture,
-    drawtype = "nodebox",
-    node_box = {
-      type = "fixed",
-      fixed = {{-0.5, -0.5, -0.5, 0.5, -0.25 , 0.5}}
-    },
-    tiles = {data.back_texture, data.back_texture,
-        "cards_side.png", "cards_side.png",
-        "cards_side.png", "cards_side.png"
-    },
-    paramtype = "light",
-    paramtype2 = "facedir",
-    on_dig = function(pos, node, player)
-      if minetest.is_protected(pos, player:get_player_name()) then
+    inventory_image = data.inventory_image,
+    wield_image = data.inventory_image,
+    on_place = function(itemstack, placer, pointed_thing)
+      if pointed_thing.type ~= "node" then
         return
       end
-      local meta  = minetest.get_meta(pos)
-      local count = meta:get_int("count")
-      local top = meta:get_string(count)
-      player:get_inventory():add_item("main", top)
-      if count == 0 then
-        node.name = "air"
-        minetest.set_node(pos, node)
-        return
-      else
-        meta:set_int("count", count - 1)
-        meta:set_string("infotext", count)
+      local pos = pointed_thing.under
+      local node = minetest.get_node(pos)
+      if not minetest.registered_nodes[node.name].buildable_to then
+        pos = pointed_thing.above
+        node = minetest.get_node(pos)
+        if not minetest.registered_nodes[node.name].buildable_to then
+          return
+        end
       end
-    end,
-    after_place_node = function(pos, placer, itemstack, pointed_thing)
+      if minetest.is_protected(pos, placer:get_player_name())then
+        return
+      end
+      node.name = stackname
+      minetest.set_node(pos, node)
+      itemstack:take_item()
+      -- set cards
       local meta = minetest.get_meta(pos)
       local count = size
       local set = {}
@@ -106,69 +97,95 @@ local function register_deck(deckname, data)
             end
           end 
           set[i] = true
-          meta:set_string(i, "cards:card_"..deckname.."_"..data.suits[s].."_"..data.values[v])
+          meta:set_string(i, "cards:card_"..cardname.."_"..data.suits[s].."_"..data.values[v])
           count = count - 1
         end
       end
       meta:set_int("count", size - 1)
       meta:set_string("infotext", size)
       meta:set_string("formspec", STACK_FORM)
+      return itemstack
     end,
-    on_receive_fields = function(pos, formname, fields, player)
-      if fields.collect then 
-        local meta = minetest.get_meta(pos)
-        if meta:get_int("count") == 31 then
-          player:get_inventory():add_item("main", 
-              "cards:stack_"..size)
-          minetest.set_node(pos, {name = "air"})
-        else
-          minetest.chat_send_player(player:get_player_name(), 
-              "[cards] stack not complete!")
+  })
+  if not minetest.registered_nodes[stackname] then
+    minetest.register_node(stackname, {
+      description = "set of playing cards ("..cardname..")",
+      inventory_image = data.back_texture,
+      wield_image = data.back_texture,
+      drawtype = "nodebox",
+      node_box = {
+        type = "fixed",
+        fixed = {{-0.5, -0.5, -0.5, 0.5, -0.25 , 0.5}}
+      },
+      tiles = {data.back_texture, data.back_texture,
+          "cards_side.png", "cards_side.png",
+          "cards_side.png", "cards_side.png"
+      },
+      paramtype = "light",
+      paramtype2 = "facedir",
+      on_dig = function(pos, node, player)
+        if minetest.is_protected(pos, player:get_player_name()) then
+          return
         end
-      elseif fields.flip then
-        local meta = minetest.get_meta(pos)
-        local count = meta:get_int("count")
-        for i = 0, count / 2 do
-          local a = meta:get_string(i)
-          local b = meta:get_string(count - i)
-          meta:set_string(i, b)
-          meta:set_string(count - i, a)
-        end
-        meta:set_string("formspec", CARD_FORM)
-        minetest.swap_node(pos, {name = meta:get_string(count)})
-      elseif fields.draw_turned then
         local meta  = minetest.get_meta(pos)
         local count = meta:get_int("count")
         local top = meta:get_string(count)
-        player:get_inventory():add_item("main", {name="cards:turned_card", count=1, wear=0, metadata= top})
+        player:get_inventory():add_item("main", top)
         if count == 0 then
-          minetest.set_node(pos, {name = "air"})
+          node.name = "air"
+          minetest.set_node(pos, node)
           return
         else
           meta:set_int("count", count - 1)
           meta:set_string("infotext", count)
-        end  
-      elseif fields.remove then  
-        minetest.set_node(pos, {name = "air"})
-      elseif fields.shuffle then
-        local meta = minetest.get_meta(pos)
-        local count = meta:get_int("count")
-        for i = 0, count do
-          local j = math.random(i, count)
-          local a = meta:get_string(i)
-          local b = meta:get_string(j)
-          meta:set_string(i, b)
-          meta:set_string(j, a)
         end
-      end
-    end,
-    groups = {oddly_breakable_by_hand = 3, card = 2},
-  })
+      end,
+      on_receive_fields = function(pos, formname, fields, player)
+        if fields.flip then
+          local meta = minetest.get_meta(pos)
+          local count = meta:get_int("count")
+          for i = 0, count / 2 do
+            local a = meta:get_string(i)
+            local b = meta:get_string(count - i)
+            meta:set_string(i, b)
+            meta:set_string(count - i, a)
+          end
+          meta:set_string("formspec", CARD_FORM)
+          minetest.swap_node(pos, {name = meta:get_string(count)})
+        elseif fields.draw_turned then
+          local meta  = minetest.get_meta(pos)
+          local count = meta:get_int("count")
+          local top = meta:get_string(count)
+          player:get_inventory():add_item("main", {name="cards:turned_card", count=1, wear=0, metadata= top})
+          if count == 0 then
+            minetest.set_node(pos, {name = "air"})
+            return
+          else
+            meta:set_int("count", count - 1)
+            meta:set_string("infotext", count)
+          end  
+        elseif fields.remove then  
+          minetest.set_node(pos, {name = "air"})
+        elseif fields.shuffle then
+          local meta = minetest.get_meta(pos)
+          local count = meta:get_int("count")
+          for i = 0, count do
+            local j = math.random(i, count)
+            local a = meta:get_string(i)
+            local b = meta:get_string(j)
+            meta:set_string(i, b)
+            meta:set_string(j, a)
+          end
+        end
+      end,
+      groups = {oddly_breakable_by_hand = 3, card = 2},
+    })
+  end
 
   for s = 1, data.number_of_suits  do
   for v = 1, data.number_of_values do
-  if not minetest.registered_nodes["cards:card_"..deckname.."_"..data.suits[s].."_"..data.values[v]] then
-    local name = "cards:card_"..deckname.."_"..data.suits[s].."_"..data.values[v]
+  local name = "cards:card_"..cardname.."_"..data.suits[s].."_"..data.values[v]
+  if not minetest.registered_nodes[name] then
     local texture = data.value_textures[v].."^"..data.suit_textures[s].."^[colorize:"..data.colors[s].."^[noalpha"
     minetest.register_node(name, {
       description = data.suits[s].." "..data.values[v],
@@ -280,6 +297,7 @@ local function register_deck(deckname, data)
 end
 
 register_deck("32", {
+  cardname = "green",
   number_of_suits = 4,
   number_of_values = 8,
   colors = {"#F00", "#F00", "#000", "#000"},
@@ -302,9 +320,11 @@ register_deck("32", {
     "cards_A.png"
   },
   back_texture = "cards_back_3.png",
+  inventory_image = "cards_deck_32.png",
 })
 
 register_deck("52", {
+  cardname = "blue",
   number_of_suits = 4,
   number_of_values = 13,
   colors = {"#FA0", "#F00", "#0B0", "#000"},
@@ -332,9 +352,11 @@ register_deck("52", {
     "cards_A.png"
   },
   back_texture = "cards_back.png",
+  inventory_image = "cards_deck_52.png",
 })
 
 register_deck("104", {
+  cardname = "blue",
   number_of_suits = 8,
   number_of_values = 13,
   colors = {"#FA0", "#F00", "#0B0", "#000"},
@@ -362,9 +384,11 @@ register_deck("104", {
     "cards_A.png"
   },
   back_texture = "cards_back.png",
+  inventory_image = "cards_deck_104.png",
 })
 
 register_deck("JOKER", {
+  cardname = "JOKER",
   number_of_suits = 3,
   number_of_values = 2,
   colors = {"#000", "#F00", "#800"},
@@ -379,7 +403,11 @@ register_deck("JOKER", {
     "cards_J.png",
   },
   back_texture = "cards_back.png",
+  inventory_image = "cards_deck_joker.png",
 })
+
+------
+-- Box
 
 local show_box_formspec = function(itemstack, player, pointed_thing)
   if player:is_player() then
@@ -445,6 +473,16 @@ end)
 ---------
 -- Jetons
 
+local function set_count(pos, placer, itemstack, pointed_thing)
+  minetest.chat_send_all("hello")
+  local stack_count = itemstack:get_count()
+  local meta  = minetest.get_meta(pos)
+  local count = meta:get_int("infotext")
+  meta:set_int("infotext", count + stack_count)
+  itemstack:clear()
+  return itemstack
+end
+
 local function register_jeton(name, color)
 
   local texture = "cards_jeton.png^[colorize:"..color.."^[noalpha"
@@ -472,25 +510,17 @@ local function register_jeton(name, color)
       end 
       local pos  = pointed_thing.under
       local node = minetest.get_node(pos)
-      local stack_count = itemstack:get_count()
       if node.name ~= node_name then
         pos = pointed_thing.above
-        minetest.item_place(itemstack, placer, pointed_thing)
-        local node = minetest.get_node(pos)
-        if node.name ~= node_name then
-          return itemstack
-        end
+        return minetest.item_place(itemstack, placer, pointed_thing)
       end
       if minetest.is_protected(pos, placer:get_player_name()) then
         return
       end
-      -- add jetons to stack
-      local meta  = minetest.get_meta(pos)
-      local count = meta:get_int("infotext")
-      meta:set_int("infotext", count + stack_count)
-      itemstack:clear()
+      itemstack = set_count(pos, placer, itemstack, pointed_thing) -- add jetons to stack
       return itemstack
     end,
+    after_place_node = set_count,
     on_dig = function(pos, node, player)
       if minetest.is_protected(pos, player:get_player_name()) then
         return
