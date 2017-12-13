@@ -15,8 +15,7 @@ local CARD_FORM = "size[3,5]"..
     "button_exit[0,2;3,1;delete;not show again]"..
     "button_exit[0,3;3,1;quit;quit]"
 local box_form = "size[10,4]"
-local MAX_WEAR = 65535
-local WEAR_MULTIPLIER = 128
+local CARDS_PER_BOX = 500
 
 
 minetest.register_node("cards:turned_card", {
@@ -106,6 +105,10 @@ local function register_deck(deckname, data)
       meta:set_string("formspec", STACK_FORM)
       return itemstack
     end,
+  })
+  minetest.register_craft({
+    output = "cards:card_box "..size,
+    recipe = {{name}}, 
   })
   if not minetest.registered_nodes[stackname] then
     minetest.register_node(stackname, {
@@ -409,20 +412,41 @@ register_deck("JOKER", {
 ------
 -- Box
 
-local show_box_formspec = function(itemstack, player, pointed_thing)
+local show_box_formspec = function(itemstack, player, pointed_thing, formpart)
   if player:is_player() then
+    if not formpart then
+      formpart = ""
+    end
     minetest.show_formspec(player:get_player_name(), "cards:card_box", 
-        box_form.."label[0,0;Parts left:"..
-        math.floor((MAX_WEAR - itemstack:get_wear()) / WEAR_MULTIPLIER).."]")
+      box_form..formpart.."button[6,0;4,1;collect;collect from inventory]".."label[0,0;Parts left:"..
+      math.floor(itemstack:get_count()).."]")
   end 
 end
+local show_box_formspec_open = function(itemstack, player, pointed_thing)
+  return show_box_formspec(itemstack, player, pointed_thing, "button_exit[4,0;2,1;close;close]")
+end
+local show_box_formspec_closed = function(itemstack, player, pointed_thing)
+  return show_box_formspec(itemstack, player, pointed_thing, "button_exit[4,0;2,1;open;open]")
+end
 
-minetest.register_tool("cards:card_box", {
+
+minetest.register_node("cards:card_box_open", {
   description = "Box which spawns card decks",
-  inventory_image = "cards_back_3.png",
-  on_place = show_box_formspec,
-  on_secondary_use = show_box_formspec,
-  on_use = function(itemstack, player, pointed_thing)
+  drawtype = "nodebox",
+  node_box = {
+      type = "fixed",
+      fixed = {{0.5, -0.5, -0.5, -0.125, 0 , 0.5},
+               {-0.125, 0, -0.5, -0.25, 0.625 , 0.5},}
+  },
+  tiles = {"default_wood.png^cards_card_box_top.png","default_wood.png",
+           "default_wood.png", "default_wood.png",
+           "default_wood.png", "default_wood.png"
+  },
+  paramtype = "light",
+  stack_max = CARDS_PER_BOX,
+  on_place = show_box_formspec_open,
+  on_secondary_use = show_box_formspec_open,
+  on_use = function(itemstack, player, pointed_thing) --leftclick
     if pointed_thing.type ~= "node" then
       return nil
     end
@@ -440,9 +464,41 @@ minetest.register_tool("cards:card_box", {
     if count == 0 then
       count = 1
     end
-    itemstack:add_wear(-count*WEAR_MULTIPLIER)
+    itemstack:set_count(itemstack:get_count() + count)
     minetest.remove_node(pos)
     return itemstack
+  end,
+})
+minetest.register_node("cards:card_box", {
+  description = "Box which spawns card decks",
+  drawtype = "nodebox",
+  node_box = {
+      type = "fixed",
+      fixed = {{0.5, -0.5, -0.5, -0.125, 0.125 , 0.5}}
+  },
+  tiles = {"default_wood.png","default_wood.png",
+           "default_wood.png", "default_wood.png",
+           "default_wood.png", "default_wood.png"
+  },
+  paramtype = "light",
+  stack_max = CARDS_PER_BOX,
+  on_place = show_box_formspec_closed,
+  on_secondary_use = show_box_formspec_closed,
+  on_use = function(itemstack, player, pointed_thing) --leftclick
+    if pointed_thing.type ~= "node" then
+      return nil
+    end
+    local pos = pointed_thing.under
+    if minetest.is_protected(pos, player:get_player_name()) then
+      return nil
+    end
+    local node = minetest.get_node(pos)
+    if  minetest.get_node_group(node.name, "card")  == 0 and
+        minetest.get_node_group(node.name, "jeton") == 0 then
+      return nil
+    end
+    minetest.chat_send_player(player:get_player_name(), "Open in menu to collect pieces")
+    return nil
   end,
 })
 
@@ -450,18 +506,47 @@ minetest.register_on_player_receive_fields(function(player, formname, fields)
     if formname ~= "cards:card_box" then
       return false
     end
+    local itemstack = player:get_wielded_item()
+    if fields.open then
+      itemstack:set_name("cards:card_box_open")
+      player:set_wielded_item(itemstack)
+      return true
+    end
+    if fields.close then
+      itemstack:set_name("cards:card_box")
+      player:set_wielded_item(itemstack)
+      return true
+    end
     if fields.quit then
       return true
     end
-    local itemstack = player:get_wielded_item()
     local inv = player:get_inventory()
+    if fields.collect then
+      local collected = 0
+      local list = inv:get_list("main")
+      for i, stack in ipairs(list) do
+        local name = stack:get_name()
+        if  minetest.get_item_group(name, "card")  > 0 or
+            minetest.get_item_group(name, "jeton") > 0 then
+          collected = collected + stack:get_count()
+          stack:clear()
+          list[i]=stack
+        end
+      end
+      inv:set_list("main", list)
+      itemstack:set_count(itemstack:get_count() + collected)
+      player:set_wielded_item(itemstack)
+      show_box_formspec(itemstack, player)
+      return true
+    end
     for key,value in pairs(fields) do  
       local d = string.find(key,"#")
       local itemname = string.sub(key,1,d-1)
-      local cost = tonumber(string.sub(key, d+1))*WEAR_MULTIPLIER
-      if cost < MAX_WEAR - itemstack:get_wear() then
+      local cost = tonumber(string.sub(key, d+1))
+      local count = itemstack:get_count()
+      if cost < count then
         inv:add_item("main", itemname.." "..value)
-        itemstack:add_wear(cost)
+        itemstack:set_count(count-cost)
       end
     end
     player:set_wielded_item(itemstack)
@@ -551,8 +636,22 @@ register_jeton("yellow", "#FF0:224")
 -- Crafts
 
 minetest.register_craft({
-  output = "cards:card_box",
+  output = "cards:card_box "..CARDS_PER_BOX,
   recipe = {{"default:chest",    "dye:black",     "dye:green"},
             {"default:clay_lump","dye:red"  ,     "dye:blue"},
             {"default:paper",    "default:paper", "default:paper"},} 
 })
+
+minetest.register_craft({
+  output = "cards:card_box",
+  recipe = {{"group:jeton"}}, 
+})
+
+minetest.register_craft({
+  output = "cards:card_box",
+  recipe = {{"group:card"}}, 
+})
+
+
+
+
