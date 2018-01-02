@@ -1,6 +1,4 @@
 
-local ENGLISH_STYLE = true
-
 math.randomseed(os.time())
 
 local STACK_FORM = "size[2,6]"..
@@ -68,7 +66,10 @@ local function register_deck(deckname, data)
       end
       local pos = pointed_thing.under
       local node = minetest.get_node(pos)
-      if not minetest.registered_nodes[node.name].buildable_to then
+      local new_stack = true
+      if minetest.get_item_group(node.name, "card") == 2 then
+        new_stack = false
+      elseif not minetest.registered_nodes[node.name].buildable_to then
         pos = pointed_thing.above
         node = minetest.get_node(pos)
         if not minetest.registered_nodes[node.name].buildable_to then
@@ -78,11 +79,17 @@ local function register_deck(deckname, data)
       if minetest.is_protected(pos, placer:get_player_name())then
         return
       end
-      node.name = stackname
-      minetest.set_node(pos, node)
+      if new_stack then
+        node.name = stackname
+        minetest.set_node(pos, node)
+      end
       itemstack:take_item()
       -- set cards
       local meta = minetest.get_meta(pos)
+      local old_count = 0
+      if not new_stack then
+        old_count = meta:get_int("count") + 1
+      end
       local count = size
       local set = {}
       for s = 1, data.number_of_suits do
@@ -96,12 +103,12 @@ local function register_deck(deckname, data)
             end
           end 
           set[i] = true
-          meta:set_string(i, "cards:card_"..cardname.."_"..data.suits[s].."_"..data.values[v])
+          meta:set_string(i + old_count, "cards:card_"..cardname.."_"..data.suits[s].."_"..data.values[v])
           count = count - 1
         end
       end
-      meta:set_int("count", size - 1)
-      meta:set_string("infotext", size)
+      meta:set_int("count", old_count + size - 1)
+      meta:set_string("infotext", old_count + size)
       meta:set_string("formspec", STACK_FORM)
       return itemstack
     end,
@@ -190,6 +197,9 @@ local function register_deck(deckname, data)
   local name = "cards:card_"..cardname.."_"..data.suits[s].."_"..data.values[v]
   if not minetest.registered_nodes[name] then
     local texture = data.value_textures[v].."^"..data.suit_textures[s].."^[colorize:"..data.colors[s].."^[noalpha"
+    if data.not_colorize_suit then
+      texture = data.value_textures[v].."^[colorize:"..data.colors[s].."^"..data.suit_textures[s].."^[noalpha"
+    end
     minetest.register_node(name, {
       description = data.suits[s].." "..data.values[v],
       inventory_image = texture,
@@ -311,14 +321,14 @@ register_deck("32", {
     "cards_pike.png",
     "cards_clover.png"
   },
-  values = {"7", "8", "9", "10", "B", "D", "K", "A"},
+  values = {"7", "8", "9", "10", "J", "Q", "K", "A"},
   value_textures = {
     "cards_7.png",
     "cards_8.png",
     "cards_9.png",
     "cards_10.png",
-    "cards_B.png",
-    "cards_D.png",
+    "cards_J.png",
+    "cards_Q.png",
     "cards_K.png",
     "cards_A.png"
   },
@@ -358,6 +368,7 @@ register_deck("52", {
   inventory_image = "cards_deck_52.png",
 })
 
+--[[
 register_deck("104", {
   cardname = "blue",
   number_of_suits = 8,
@@ -388,10 +399,10 @@ register_deck("104", {
   },
   back_texture = "cards_back.png",
   inventory_image = "cards_deck_104.png",
-})
+})]]--
 
-register_deck("JOKER", {
-  cardname = "JOKER",
+register_deck("Joker", {
+  cardname = "Joker",
   number_of_suits = 3,
   number_of_values = 2,
   colors = {"#000", "#F00", "#800"},
@@ -407,6 +418,39 @@ register_deck("JOKER", {
   },
   back_texture = "cards_back.png",
   inventory_image = "cards_deck_joker.png",
+})
+
+register_deck("Minetest", {
+  cardname = "Minetest",
+  number_of_suits = 4,
+  number_of_values = 13,
+  not_colorize_suit = true,
+  colors = {"#FA0", "#F00", "#11B", "#000"},
+  suits = {"mese", "apples", "swords", "coal"},
+  suit_textures = {
+    "cards_mese_crystal.png",
+    "cards_apple.png",
+    "cards_tool_diamondsword.png",
+    "cards_coal_lump.png"
+  },
+  values = { "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"},
+  value_textures = {
+    "cards_2.png",
+    "cards_3.png",
+    "cards_4.png",
+    "cards_5.png",
+    "cards_6.png",
+    "cards_7.png",
+    "cards_8.png",
+    "cards_9.png",
+    "cards_10.png",
+    "cards_J.png",
+    "cards_Q.png",
+    "cards_K.png",
+    "cards_A.png"
+  },
+  back_texture = "cards_back_mese.png",
+  inventory_image = "cards_deck_minetest_52.png",
 })
 
 ------
